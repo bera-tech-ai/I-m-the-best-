@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OTP Verification System</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Send OTP</h2>
+        <input type="email" id="email" placeholder="Enter your email">
+        <button onclick="sendOTP()">Send OTP</button>
+        
+        <div id="otpSection" style="display: none; margin-top: 20px;">
+            <h3>Verify OTP</h3>
+            <input type="text" id="otp" placeholder="Enter OTP">
+            <button onclick="verifyOTP()">Verify OTP</button>
+        </div>
+        
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        let userEmail = '';
+        
+        async function sendOTP() {
+            const email = document.getElementById('email').value;
+            userEmail = email;
+            
+            if (!email) {
+                showMessage('Please enter an email address', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:3000/send-otp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage('OTP sent to your email', 'success');
+                    document.getElementById('otpSection').style.display = 'block';
+                } else {
+                    showMessage(data.error || 'Failed to send OTP', 'error');
+                }
+            } catch (error) {
+                showMessage('Error sending OTP', 'error');
+            }
+        }
+        
+        async function verifyOTP() {
+            const otp = document.getElementById('otp').value;
+            
+            if (!otp) {
+                showMessage('Please enter OTP', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:3000/verify-otp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        email: userEmail, 
+                        otp 
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage('OTP verified successfully!', 'success');
+                    // Redirect or perform next action here
+                } else {
+                    showMessage(data.error || 'Invalid OTP', 'error');
+                }
+            } catch (error) {
+                showMessage('Error verifying OTP', 'error');
+            }
+        }
+        
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${type}`;
+            messageDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+  </html>
