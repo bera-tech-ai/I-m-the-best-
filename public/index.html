@@ -1,147 +1,124 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OTP Verification System</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 400px;
-            margin: 50px auto;
-            padding: 20px;
-        }
-        .container {
-            background: #f9f9f9;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        input {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        button {
-            width: 100%;
-            padding: 10px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-        .message {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 5px;
-            display: none;
-        }
-        .success {
-            background: #d4edda;
-            color: #155724;
-        }
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <h2>Send OTP</h2>
-        <input type="email" id="email" placeholder="Enter your email">
-        <button onclick="sendOTP()">Send OTP</button>
-        
-        <div id="otpSection" style="display: none; margin-top: 20px;">
-            <h3>Verify OTP</h3>
-            <input type="text" id="otp" placeholder="Enter OTP">
-            <button onclick="verifyOTP()">Verify OTP</button>
+        <div class="header">
+            <h1><i class="fas fa-shield-alt"></i> OTP Verification</h1>
+            <p class="subtitle">Secure email verification system</p>
         </div>
-        
-        <div id="message" class="message"></div>
+
+        <div class="card">
+            <div class="tab-container">
+                <button class="tab active" onclick="switchTab('send')">
+                    <i class="fas fa-paper-plane"></i> Send OTP
+                </button>
+                <button class="tab" onclick="switchTab('verify')">
+                    <i class="fas fa-check-circle"></i> Verify OTP
+                </button>
+            </div>
+
+            <!-- Send OTP Tab -->
+            <div id="send-tab" class="tab-content active">
+                <h2><i class="fas fa-envelope"></i> Send Verification Code</h2>
+                <p>Enter your email address to receive a one-time password (OTP)</p>
+                
+                <div class="form-group">
+                    <label for="email"><i class="fas fa-at"></i> Email Address</label>
+                    <input type="email" id="email" placeholder="your.email@example.com">
+                    <div class="hint">We'll send a 6-digit code to this email</div>
+                </div>
+
+                <button class="btn-primary" onclick="sendOTP()" id="send-btn">
+                    <i class="fas fa-paper-plane"></i> Send OTP
+                </button>
+                
+                <div class="info-box">
+                    <i class="fas fa-info-circle"></i>
+                    <div>
+                        <strong>Note:</strong> The OTP will expire in 5 minutes. 
+                        Check your spam folder if you don't see the email.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Verify OTP Tab -->
+            <div id="verify-tab" class="tab-content">
+                <h2><i class="fas fa-key"></i> Verify Your Code</h2>
+                <p>Enter the 6-digit code sent to your email</p>
+                
+                <div class="form-group">
+                    <label for="verify-email"><i class="fas fa-at"></i> Email Address</label>
+                    <input type="email" id="verify-email" placeholder="same.email@example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="otp-code"><i class="fas fa-key"></i> OTP Code</label>
+                    <div class="otp-input-container">
+                        <input type="text" id="otp-code" maxlength="6" placeholder="123456" 
+                               oninput="formatOTP(this)">
+                        <button class="btn-small" onclick="copyOTP()">
+                            <i class="fas fa-copy"></i> Paste
+                        </button>
+                    </div>
+                    <div class="hint">Enter the 6-digit code from your email</div>
+                </div>
+
+                <button class="btn-primary" onclick="verifyOTP()" id="verify-btn">
+                    <i class="fas fa-check-circle"></i> Verify OTP
+                </button>
+                
+                <div class="attempts-counter">
+                    <i class="fas fa-history"></i>
+                    <span id="attempts">Attempts remaining: 3</span>
+                </div>
+            </div>
+
+            <!-- Status Messages -->
+            <div id="message" class="message"></div>
+
+            <!-- Success Modal -->
+            <div id="success-modal" class="modal">
+                <div class="modal-content">
+                    <div class="success-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <h2>Verification Successful!</h2>
+                    <p id="success-message"></p>
+                    <div class="token-display">
+                        <label>Verification Token:</label>
+                        <code id="verification-token"></code>
+                        <button class="btn-small" onclick="copyToken()">
+                            <i class="fas fa-copy"></i> Copy
+                        </button>
+                    </div>
+                    <button class="btn-secondary" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="server-status">
+                <span class="status-indicator" id="status-indicator"></span>
+                <span id="server-status">Checking server status...</span>
+            </div>
+            <div class="links">
+                <a href="/health" target="_blank">Health Check</a>
+                <a href="/api-docs" target="_blank">API Docs</a>
+                <a href="https://myaccount.google.com/security" target="_blank">Google App Password</a>
+            </div>
+            <p class="copyright">
+                OTP Verification System &copy; 2024 | Uses Gmail SMTP with App Passwords
+            </p>
+        </div>
     </div>
 
-    <script>
-        let userEmail = '';
-        
-        async function sendOTP() {
-            const email = document.getElementById('email').value;
-            userEmail = email;
-            
-            if (!email) {
-                showMessage('Please enter an email address', 'error');
-                return;
-            }
-            
-            try {
-                const response = await fetch('http://localhost:3000/send-otp', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showMessage('OTP sent to your email', 'success');
-                    document.getElementById('otpSection').style.display = 'block';
-                } else {
-                    showMessage(data.error || 'Failed to send OTP', 'error');
-                }
-            } catch (error) {
-                showMessage('Error sending OTP', 'error');
-            }
-        }
-        
-        async function verifyOTP() {
-            const otp = document.getElementById('otp').value;
-            
-            if (!otp) {
-                showMessage('Please enter OTP', 'error');
-                return;
-            }
-            
-            try {
-                const response = await fetch('http://localhost:3000/verify-otp', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
-                        email: userEmail, 
-                        otp 
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showMessage('OTP verified successfully!', 'success');
-                    // Redirect or perform next action here
-                } else {
-                    showMessage(data.error || 'Invalid OTP', 'error');
-                }
-            } catch (error) {
-                showMessage('Error verifying OTP', 'error');
-            }
-        }
-        
-        function showMessage(text, type) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.textContent = text;
-            messageDiv.className = `message ${type}`;
-            messageDiv.style.display = 'block';
-            
-            setTimeout(() => {
-                messageDiv.style.display = 'none';
-            }, 5000);
-        }
-    </script>
+    <script src="script.js"></script>
 </body>
-  </html>
+</html>
