@@ -4,301 +4,244 @@ const crypto = require('crypto');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const Joi = require('joi');
-const winston = require('winston');
 const path = require('path');
 require('dotenv').config();
 
-// Configure logger
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.simple()
-    })
-  ]
-});
-
 const app = express();
 
-// Security middleware
+// Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public')); // Serve static files from 'public' folder
+app.use(express.static('public'));
 
 // Rate limiting
 const otpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 OTP requests per windowMs
-  message: {
-    error: 'Too many OTP requests from this IP, please try again after 15 minutes'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many OTP requests. Try again later.' }
 });
 
-// Input validation schemas
-const emailSchema = Joi.object({
-  email: Joi.string().email().required()
-});
-
-const otpSchema = Joi.object({
-  email: Joi.string().email().required(),
-  otp: Joi.string().pattern(/^\d{6}$/).required()
-});
-
-// Store OTPs (use Redis in production)
+// Store OTPs (in production, use Redis)
 const otpStore = new Map();
 
-// Configure nodemailer transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
+// ========== SMTP CONFIGURATION FOR RENDER ==========
+const getTransporter = () => {
+  // Configuration for cloud platforms
+  const config = {
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // true for 465, false for other ports
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD
+    },
+    // Timeout settings for cloud environments
+    connectionTimeout: 30000, // 30 seconds
+    greetingTimeout: 30000,   // 30 seconds
+    socketTimeout: 30000,     // 30 seconds
+    // TLS settings
+    tls: {
+      rejectUnauthorized: false // Required for Render/Heroku
+    },
+    // Debug logging
+    debug: process.env.NODE_ENV === 'development',
+    logger: process.env.NODE_ENV === 'development'
+  };
+
+  console.log('SMTP Configuration:', {
+    host: config.host,
+    port: config.port,
+    user: process.env.GMAIL_USER ? 'Set' : 'Not Set',
+    pass: process.env.GMAIL_APP_PASSWORD ? 'Set' : 'Not Set'
+  });
+
+  return nodemailer.createTransport(config);
+};
+
+// Test SMTP connection on startup
+const testSMTPConnection = async () => {
+  const transporter = getTransporter();
+  
+  try {
+    await transporter.verify();
+    console.log('✅ SMTP connection successful!');
+    return transporter;
+  } catch (error) {
+    console.error('❌ SMTP connection failed:', error.message);
+    console.log('\n🔧 Troubleshooting steps:');
+    console.log('1. Check if GMAIL_USER and GMAIL_APP_PASSWORD are set');
+    console.log('2. Verify the App Password is correct (16 characters)');
+    console.log('3. Enable 2-Step Verification in Google Account');
+    console.log('4. Check if "Less secure app access" is enabled (if not using App Password)');
+    console.log('5. Ensure no firewall is blocking port 587');
+    return null;
+  }
+};
+
+// Initialize transporter
+let transporter = null;
+testSMTPConnection().then(t => {
+  transporter = t;
+  if (transporter) {
+    console.log('📧 Email service is ready');
   }
 });
 
-// Verify transporter configuration
-transporter.verify(function(error, success) {
-  if (error) {
-    logger.error('Mail transporter configuration error:', error);
-  } else {
-    logger.info('Mail transporter is ready to send messages');
-  }
-});
-
-// Generate 6-digit OTP
+// Generate OTP
 function generateOTP() {
   return crypto.randomInt(100000, 999999).toString();
 }
 
 // ========== ROUTES ==========
 
-// 1. Root route - Serve HTML frontend
+// Home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// 2. Health check endpoint
+// Health check with SMTP status
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    service: 'OTP Verification Service',
-    version: '1.0.0'
-  });
-});
-
-// 3. API Documentation
-app.get('/api-docs', (req, res) => {
   res.json({
-    endpoints: [
-      {
-        method: 'POST',
-        path: '/api/send-otp',
-        description: 'Send OTP to email',
-        body: { email: 'user@example.com' }
-      },
-      {
-        method: 'POST',
-        path: '/api/verify-otp',
-        description: 'Verify OTP',
-        body: { email: 'user@example.com', otp: '123456' }
-      },
-      {
-        method: 'GET',
-        path: '/health',
-        description: 'Service health check'
-      }
-    ]
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    smtp: {
+      configured: !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+      user_set: !!process.env.GMAIL_USER,
+      pass_set: !!process.env.GMAIL_APP_PASSWORD,
+      connected: !!transporter
+    }
   });
 });
 
-// 4. Send OTP endpoint with rate limiting
+// Send OTP
 app.post('/api/send-otp', otpLimiter, async (req, res) => {
   try {
-    // Validate input
-    const { error, value } = emailSchema.validate(req.body);
-    if (error) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: error.details.map(detail => detail.message)
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Check if SMTP is configured
+    if (!transporter) {
+      console.error('SMTP not configured');
+      return res.status(503).json({ 
+        error: 'Email service not configured. Please check server logs.' 
       });
     }
 
-    const { email } = value;
-    
     // Generate OTP
     const otp = generateOTP();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-    
-    // Store OTP
     otpStore.set(email, {
       otp,
-      expiresAt,
+      expiresAt: Date.now() + 5 * 60 * 1000,
       attempts: 0
     });
 
-    // Email template
-    const mailOptions = {
-      from: {
-        name: 'OTP Verification Service',
-        address: process.env.GMAIL_USER
-      },
-      to: email,
-      subject: 'Your OTP Verification Code',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
-          <h2 style="color: #333; text-align: center;">OTP Verification</h2>
-          <p style="color: #666; font-size: 16px; line-height: 1.5;">
-            Your One-Time Password (OTP) for verification is:
-          </p>
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; text-align: center; font-size: 36px; font-weight: bold; letter-spacing: 15px; margin: 30px 0; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            ${otp}
-          </div>
-          <p style="color: #999; font-size: 14px; text-align: center;">
-            This OTP will expire in 5 minutes. Do not share this code with anyone.
-          </p>
-          <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
-            <p style="color: #888; font-size: 12px;">
-              If you didn't request this code, please ignore this email or contact support if you have concerns.
-            </p>
-          </div>
-        </div>
-      `,
-      text: `Your OTP verification code is: ${otp}. This code will expire in 5 minutes.`
-    };
+    console.log(`Generated OTP for ${email}: ${otp}`);
 
     // Send email
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: email,
+      subject: 'Your OTP Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2>Your OTP Code</h2>
+          <p>Use this code to verify your email:</p>
+          <div style="font-size: 32px; font-weight: bold; letter-spacing: 10px; margin: 20px 0;">
+            ${otp}
+          </div>
+          <p>This code expires in 5 minutes.</p>
+        </div>
+      `,
+      text: `Your OTP code is: ${otp}. It expires in 5 minutes.`
+    };
+
     await transporter.sendMail(mailOptions);
     
-    logger.info(`OTP sent to ${email}`);
-    
-    res.json({
-      success: true,
+    res.json({ 
+      success: true, 
       message: 'OTP sent successfully',
-      expiresIn: '5 minutes'
+      // For debugging on Render, you might want to include the OTP
+      // Remove this in production!
+      debug: process.env.NODE_ENV === 'development' ? { otp } : undefined
     });
     
   } catch (error) {
-    logger.error('Error sending OTP:', error);
+    console.error('Error sending OTP:', error);
     
+    // More specific error messages
     if (error.code === 'EAUTH') {
-      return res.status(500).json({
-        error: 'Authentication failed. Please check email configuration.'
+      return res.status(500).json({ 
+        error: 'Email authentication failed. Check Gmail credentials.' 
       });
     }
     
-    res.status(500).json({
-      error: 'Failed to send OTP. Please try again later.'
+    if (error.code === 'ETIMEDOUT') {
+      return res.status(500).json({ 
+        error: 'Email service timeout. Please try again.' 
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to send OTP. Please try again later.' 
     });
   }
 });
 
-// 5. Verify OTP endpoint
-app.post('/api/verify-otp', async (req, res) => {
+// Verify OTP
+app.post('/api/verify-otp', (req, res) => {
   try {
-    // Validate input
-    const { error, value } = otpSchema.validate(req.body);
-    if (error) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: error.details.map(detail => detail.message)
-      });
-    }
-
-    const { email, otp } = value;
+    const { email, otp } = req.body;
     
     const storedData = otpStore.get(email);
     
     if (!storedData) {
-      return res.status(400).json({
-        error: 'No OTP found for this email or OTP has expired'
-      });
+      return res.status(400).json({ error: 'OTP not found or expired' });
     }
-
-    // Check if OTP has expired
+    
     if (Date.now() > storedData.expiresAt) {
       otpStore.delete(email);
-      logger.warn(`Expired OTP attempt for ${email}`);
-      return res.status(400).json({
-        error: 'OTP has expired. Please request a new one.'
-      });
+      return res.status(400).json({ error: 'OTP expired' });
     }
-
-    // Check max attempts (3 attempts allowed)
-    if (storedData.attempts >= 3) {
-      otpStore.delete(email);
-      logger.warn(`Max OTP attempts exceeded for ${email}`);
-      return res.status(400).json({
-        error: 'Maximum OTP attempts exceeded. Please request a new OTP.'
-      });
-    }
-
-    // Increment attempts
-    storedData.attempts += 1;
-    otpStore.set(email, storedData);
-
-    // Verify OTP
+    
     if (storedData.otp === otp) {
       otpStore.delete(email);
-      logger.info(`OTP verified successfully for ${email}`);
-      
-      return res.json({
-        success: true,
-        message: 'OTP verified successfully',
-        token: crypto.randomBytes(32).toString('hex') // Return a verification token
+      return res.json({ 
+        success: true, 
+        message: 'OTP verified successfully' 
       });
     } else {
-      logger.warn(`Invalid OTP attempt for ${email}. Attempt ${storedData.attempts}/3`);
+      storedData.attempts += 1;
+      otpStore.set(email, storedData);
       
-      const remainingAttempts = 3 - storedData.attempts;
+      if (storedData.attempts >= 3) {
+        otpStore.delete(email);
+        return res.status(400).json({ 
+          error: 'Too many failed attempts. Request a new OTP.' 
+        });
+      }
       
-      return res.status(400).json({
+      return res.status(400).json({ 
         error: 'Invalid OTP',
-        remainingAttempts: remainingAttempts > 0 ? remainingAttempts : 0
+        attempts: storedData.attempts 
       });
     }
     
   } catch (error) {
-    logger.error('Error verifying OTP:', error);
-    res.status(500).json({
-      error: 'Failed to verify OTP. Please try again.'
-    });
+    console.error('Error verifying OTP:', error);
+    res.status(500).json({ error: 'Verification failed' });
   }
 });
 
-// 6. 404 handler for undefined routes
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found',
-    requestedUrl: req.url,
-    method: req.method,
-    availableEndpoints: [
-      'GET /',
-      'GET /health',
-      'GET /api-docs',
-      'POST /api/send-otp',
-      'POST /api/verify-otp'
-    ]
-  });
-});
-
+// Port configuration
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
-  console.log(`\n🚀 Server started!`);
-  console.log(`👉 Open your browser and visit: http://localhost:${PORT}`);
-  console.log(`📧 Make sure GMAIL_USER and GMAIL_APP_PASSWORD are set in .env file\n`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📧 Make sure to set GMAIL_USER and GMAIL_APP_PASSWORD in Render environment`);
+  console.log(`🔗 Visit: https://dashboard.render.com/ to set environment variables`);
 });
-
-module.exports = app;
